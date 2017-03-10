@@ -1,0 +1,8 @@
+{
+	Filter = {
+		Bundles = (
+			"com.hammerandchisel.discord",
+			"com.apple.springboard",
+		);
+	};
+}

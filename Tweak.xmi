@@ -1,0 +1,263 @@
+
+
+#import "Tweak.h"
+
+#import "./SVProgressHUD/SVProgressHUD.h"
+
+#import <sys/stat.h>
+
+#define GHNotFirstLaunch @"GHNotFirstLaunch"
+
+extern char **environ;
+
+@implementation NSString (NSString_Extended)
+
+- (NSString *)urlencode {
+    NSMutableString *output = [NSMutableString string];
+    const unsigned char *source = (const unsigned char *)[self UTF8String];
+    int sourceLen = strlen((const char *)source);
+    for (int i = 0; i < sourceLen; ++i) {
+        const unsigned char thisChar = source[i];
+        if (thisChar == ' '){
+            [output appendString:@"+"];
+        } else if (thisChar == '.' || thisChar == '-' || thisChar == '_' || thisChar == '~' ||
+                   (thisChar >= 'a' && thisChar <= 'z') ||
+                   (thisChar >= 'A' && thisChar <= 'Z') ||
+                   (thisChar >= '0' && thisChar <= '9')) {
+            [output appendFormat:@"%c", thisChar];
+        } else {
+            [output appendFormat:@"%%%02X", thisChar];
+        }
+    }
+    return output;
+}
+
+@end
+
+GROUP(Discord)
+
+HOOK(DCDMessageViewController)
+
+-(void)viewDidLoad{
+    ORIG();
+    
+    if(![[NSUserDefaults standardUserDefaults] boolForKey:GHNotFirstLaunch]){
+        
+        [self GHShowWelcome];
+        
+        [[NSUserDefaults standardUserDefaults] setBool:YES forKey:GHNotFirstLaunch];
+        
+    }
+    
+    
+    
+    [SVProgressHUD setMinimumSize:CGSizeMake(150, 150)];
+    
+    [SVProgressHUD setDefaultStyle:SVProgressHUDStyleDark];
+    
+    [self applyCustomLeftButtonAction];
+    
+}
+
+-(void)viewWillAppear:(BOOL)animated{
+    ORIG();
+    if(![self.leftButton.gestureRecognizers containsObject:self.leftButtonGesture]){
+        [self applyCustomLeftButtonAction];
+    }
+    
+}
+
+-(void)viewDidAppear:(BOOL)animated{
+    ORIG();
+    
+    if(![self.leftButton.gestureRecognizers containsObject:self.leftButtonGesture]){
+        [self applyCustomLeftButtonAction];
+    }
+    
+    
+    [SVProgressHUD setMinimumSize:CGSizeMake(150, 150)];
+    
+    [SVProgressHUD setDefaultStyle:SVProgressHUDStyleDark];
+}
+
+NEW()
+-(void)GHShowWelcome{
+    
+    UIAlertController *uac = [UIAlertController alertControllerWithTitle:@"Welcome!" message:@"Thank you for using GeniusHelper. Whenever you need to send you tweak list, just tap and hold on the clip button in the bottom left corner." preferredStyle:UIAlertControllerStyleAlert];
+    
+    [uac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    
+    [self presentViewController:uac animated:YES completion:nil];
+    
+}
+
+NEW()
+-(void)applyCustomLeftButtonAction{
+    
+    self.leftButtonGesture = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(didLongPressLeftButton:)];
+    
+    [self.leftButton addGestureRecognizer:self.leftButtonGesture];
+    
+}
+
+NEW()
+-(void)didLongPressLeftButton:(id)sender{
+    
+    dispatch_async(dispatch_get_main_queue(), ^{
+        
+        [self.textInputbar.textView resignFirstResponder];
+        
+        if ((UIGestureRecognizerState)[sender state] == UIGestureRecognizerStateBegan) {
+            [self displaySendTweakListView];
+        }
+        
+    });
+    
+}
+
+NEW()
+-(void)displaySendTweakListView{
+    
+    UIAlertController *uac = [UIAlertController alertControllerWithTitle:@"GeniusHelper" message:@"Send your tweak list to this channel?" preferredStyle:UIAlertControllerStyleAlert];
+    
+    [uac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleDestructive handler:nil]];
+    
+    [uac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action){
+        
+        dispatch_async(dispatch_get_main_queue(), ^{
+            
+            [OBJCIPC sendMessageToSpringBoardWithMessageName:@"io.c0ldra1n.genius-helper-dpkg-list" dictionary:@{@"req":@"dpkg"} replyHandler:^(NSDictionary *dpkgStrDict){
+                
+                NSString *dpkgStr = dpkgStrDict[@"dpkg"];
+                
+                if(dpkgStr){
+                    
+                    [self postGhostBinText:dpkgStr completion:^(NSURL *ghostbinURL){
+                        
+                        //  Send message...
+                        
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            
+                            self.textInputbar.textView.text = [NSString stringWithFormat:@"Ghostbin to my Tweak List:\n%@\nSent with GeniusHelper[version 0.9.2] by @c0ldra1n#4690", [ghostbinURL absoluteString]];
+                            
+                            [self didPressRightButton:nil];
+                            
+                            [SVProgressHUD showSuccessWithStatus:@"Sent!"];
+                            [SVProgressHUD dismissWithDelay:0.5];
+                            
+                            NSLog(@"[Ghostbin]: %@", ghostbinURL);
+                            
+                            
+                        });
+                        
+                    }];
+                    
+                }else{
+                    
+                    self.textInputbar.textView.text = [NSString stringWithFormat:@"Something went wrong.\nInfo: %@\n\nSent with GeniusHelper[version 0.9.2] by @c0ldra1n#4690", dpkgStrDict];
+                    
+                    [self didPressRightButton:nil];
+                    
+                }
+                
+            }];
+            
+        });
+        
+    }]];
+    
+    [self presentViewController:uac animated:YES completion:nil];
+    
+}
+
+NEW()
+-(UIGestureRecognizer *)leftButtonGesture{
+    return objc_getAssociatedObject(self, @selector(leftButtonGesture));
+}
+
+NEW()
+-(void)setLeftButtonGesture:(UIGestureRecognizer *)leftButtonGesture{
+    objc_setAssociatedObject(self, @selector(leftButtonGesture), leftButtonGesture, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+
+NEW()
+-(void)postGhostBinText:(NSString *)text completion:(void (^)(NSURL *))completion{
+    
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"http://ghostbin.com/paste/new"]];
+    
+    [req setHTTPMethod:@"POST"];
+    
+    NSString *postString = [NSString stringWithFormat:@"lang=%@&text=%@", @"text", [text urlencode]];
+    
+    [req setHTTPBody:[postString dataUsingEncoding:NSUTF8StringEncoding]];
+    
+    [SVProgressHUD showWithStatus:@"Copying to ghostbin..."];
+    
+    [[[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *res, NSError *error){
+        
+        [self.view endEditing:YES];
+        
+        [SVProgressHUD dismiss];
+        
+        if([(NSHTTPURLResponse *)res statusCode] != 400){
+            
+            //  Something went well.
+            
+            NSURL *ghostbinURL = res.URL;
+            
+            completion(ghostbinURL);
+            
+        }else{
+            
+            //  Something went wrong.
+            
+            UIAlertController *uac = [UIAlertController alertControllerWithTitle:@"Something went wrong" message:@"Please try again." preferredStyle:UIAlertControllerStyleAlert];
+            
+            [uac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDestructive handler:nil]];
+            
+        }
+        
+    }] resume];
+    
+}
+
+
+END()
+
+END_GROUP()
+
+GROUP(SB)
+
+HOOK(SpringBoard)
+
+-(void)applicationDidFinishLaunching:(UIApplication *)application{
+    
+    ORIG();
+    
+    [OBJCIPC registerIncomingMessageFromAppHandlerForMessageName:@"io.c0ldra1n.genius-helper-dpkg-list" handler:^NSDictionary *(NSDictionary *req){
+        
+        system("dpkg -l > /tmp/ghdpkgl");
+        
+        NSDictionary *send = @{@"dpkg":[NSString stringWithContentsOfFile:@"/tmp/ghdpkgl" encoding:NSUTF8StringEncoding error:nil]};
+        
+        return send;
+        
+    }];
+    
+}
+
+END()
+
+END_GROUP()
+
+
+CTOR(){
+    
+    if([OBJCIPC isSpringBoard]){
+        INIT(SB);
+    }else{
+        INIT(Discord);
+    }
+    
+}
